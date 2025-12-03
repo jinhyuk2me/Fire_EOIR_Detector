@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QFileDialog,
 )
-from PyQt6.QtCore import QTimer, Qt, QObject, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, QObject, pyqtSignal, QSize
 from PyQt6.QtGui import QImage, QPixmap
 
 import numpy as np
@@ -182,6 +182,30 @@ def _compact_layout(layout, margins=(6, 4, 6, 4), h_spacing=6, v_spacing=4):
         layout.setSpacing(min(h_spacing, v_spacing))
 
 
+def _fix_label_height(label, lines=2, padding=4):
+    """라벨 높이를 고정해 텍스트 길이 변화로 레이아웃이 흔들리지 않도록 설정"""
+    fm = label.fontMetrics()
+    h = fm.lineSpacing() * max(1, lines) + padding
+    label.setFixedHeight(h)
+    label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+
+class StablePreviewLabel(QLabel):
+    """카메라 프리뷰가 바뀌어도 sizeHint가 흔들리지 않도록 고정된 힌트를 제공"""
+    def __init__(self, text="", min_size=QSize(320, 180), parent=None):
+        super().__init__(text, parent)
+        self._base_hint = min_size
+        self.setMinimumSize(min_size)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def sizeHint(self):
+        return self._base_hint
+
+    def minimumSizeHint(self):
+        return self._base_hint
+
+
 class LogSignaller(QObject):
     message = pyqtSignal(str)
 
@@ -211,6 +235,7 @@ class MainWindow(QMainWindow):
         self.ir_ts_history = deque(maxlen=60)
         self.config = controller.cfg if hasattr(controller, "cfg") else {}
         self._last_det_ts = None
+        self._coord_auto_set = False
         coord_params = self.controller.get_coord_cfg() if self.controller else {'offset_x': 0.0, 'offset_y': 0.0, 'scale': 1.0}
         self.fire_fusion = FireFusion(
             ir_size=(160, 120),
@@ -222,24 +247,31 @@ class MainWindow(QMainWindow):
 
         rgb_input_cfg, ir_input_cfg = (self.controller.get_input_cfg() if self.controller else ({}, {}))
 
-        self.rgb_label = QLabel("RGB Preview")
-        self.rgb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.rgb_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.rgb_label = StablePreviewLabel("RGB Preview")
         self.rgb_info = QLabel("-")
         self.rgb_info.setWordWrap(True)
+        _fix_label_height(self.rgb_info, lines=2)
+        self.rgb_info.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.rgb_info.setMinimumWidth(200)
 
-        self.det_label = QLabel("Det Preview")
-        self.det_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.det_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.det_label = StablePreviewLabel("Det Preview")
         self.det_info = QLabel("-")
         self.det_info.setWordWrap(True)
-        self.ir_label = QLabel("IR Preview")
-        self.ir_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ir_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        _fix_label_height(self.det_info, lines=2)
+        self.det_info.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.det_info.setMinimumWidth(200)
+        self.ir_label = StablePreviewLabel("IR Preview")
         self.ir_info = QLabel("-")
         self.ir_info.setWordWrap(True)
+        _fix_label_height(self.ir_info, lines=2)
+        self.ir_info.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.ir_info.setMinimumWidth(200)
 
         self.status_label = QLabel("Status: -")
+        self.status_label.setWordWrap(True)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        _fix_label_height(self.status_label, lines=3, padding=6)
 
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
@@ -360,63 +392,66 @@ class MainWindow(QMainWindow):
         _compact_layout(input_layout, margins=(8, 6, 8, 6), h_spacing=6, v_spacing=6)
 
         coord_layout = QVBoxLayout()
-        _compact_layout(coord_layout, margins=(8, 6, 8, 6), h_spacing=6, v_spacing=6)
-        coord_row = QHBoxLayout()
-        _compact_layout(coord_row, margins=(0, 0, 0, 0), h_spacing=6, v_spacing=6)
+        _compact_layout(coord_layout, margins=(8, 6, 8, 6), h_spacing=6, v_spacing=8)
+
+        # Offset 그룹
+        offset_group = QGroupBox("Offset")
+        offset_form = QGridLayout()
+        _compact_layout(offset_form, margins=(8, 6, 8, 6), h_spacing=6, v_spacing=6)
         self.offset_x_spin = QDoubleSpinBox()
         self.offset_x_spin.setRange(-1000.0, 1000.0)
         self.offset_x_spin.setDecimals(2)
         self.offset_x_spin.setValue(coord_params.get('offset_x', 0.0))
-        coord_row.addWidget(QLabel("Offset X"))
-        coord_row.addWidget(self.offset_x_spin)
-
         self.offset_y_spin = QDoubleSpinBox()
         self.offset_y_spin.setRange(-1000.0, 1000.0)
         self.offset_y_spin.setDecimals(2)
         self.offset_y_spin.setValue(coord_params.get('offset_y', 0.0))
-        coord_row.addWidget(QLabel("Offset Y"))
-        coord_row.addWidget(self.offset_y_spin)
+        offset_form.addWidget(QLabel("Offset X"), 0, 0)
+        offset_form.addWidget(self.offset_x_spin, 0, 1, 1, 3)
+        offset_form.addWidget(QLabel("Offset Y"), 1, 0)
+        offset_form.addWidget(self.offset_y_spin, 1, 1, 1, 3)
+        offset_form.addWidget(QLabel("Offset Step"), 2, 0)
+        self.offset_step_spin = QDoubleSpinBox()
+        self.offset_step_spin.setRange(0.1, 100.0)
+        self.offset_step_spin.setValue(5.0)
+        offset_form.addWidget(self.offset_step_spin, 2, 1, 1, 3)
+        for col, (text, dx, dy) in enumerate([("←", -1, 0), ("→", 1, 0), ("↑", 0, -1), ("↓", 0, 1)], start=1):
+            btn = QPushButton(text)
+            btn.clicked.connect(lambda _, dx=dx, dy=dy: self.nudge_offset(dx * self.offset_step_spin.value(), dy * self.offset_step_spin.value()))
+            offset_form.addWidget(btn, 3, col)
+        offset_group.setLayout(offset_form)
+        coord_layout.addWidget(offset_group)
 
+        # Scale 그룹
+        scale_group = QGroupBox("Scale")
+        scale_form = QGridLayout()
+        _compact_layout(scale_form, margins=(8, 6, 8, 6), h_spacing=6, v_spacing=6)
         self.scale_spin = QDoubleSpinBox()
         self.scale_spin.setRange(0.1, 20.0)
         self.scale_spin.setDecimals(3)
         self.scale_spin.setSingleStep(0.05)
-        self.scale_spin.setValue(coord_params.get('scale', 1.0))
-        coord_row.addWidget(QLabel("Scale"))
-        coord_row.addWidget(self.scale_spin)
-
-        self.apply_coord_btn = QPushButton("Apply Coord")
-        self.apply_coord_btn.clicked.connect(self.apply_coord_settings)
-        coord_row.addWidget(self.apply_coord_btn)
-        coord_layout.addLayout(coord_row)
-
-        step_layout = QHBoxLayout()
-        _compact_layout(step_layout, margins=(0, 0, 0, 0), h_spacing=6, v_spacing=6)
-        step_layout.addWidget(QLabel("Offset Step"))
-        self.offset_step_spin = QDoubleSpinBox()
-        self.offset_step_spin.setRange(0.1, 100.0)
-        self.offset_step_spin.setValue(5.0)
-        step_layout.addWidget(self.offset_step_spin)
-        for text, dx, dy in [("←", -1, 0), ("→", 1, 0), ("↑", 0, -1), ("↓", 0, 1)]:
-            btn = QPushButton(text)
-            btn.clicked.connect(lambda _, dx=dx, dy=dy: self.nudge_offset(dx * self.offset_step_spin.value(), dy * self.offset_step_spin.value()))
-            step_layout.addWidget(btn)
-        coord_layout.addLayout(step_layout)
-
-        scale_step_layout = QHBoxLayout()
-        _compact_layout(scale_step_layout, margins=(0, 0, 0, 0), h_spacing=6, v_spacing=6)
-        scale_step_layout.addWidget(QLabel("Scale Step"))
+        self.scale_spin.setValue(coord_params.get('scale', 1.0) if coord_params.get('scale') is not None else 1.0)
+        scale_form.addWidget(QLabel("Scale"), 0, 0)
+        scale_form.addWidget(self.scale_spin, 0, 1, 1, 3)
+        scale_form.addWidget(QLabel("Scale Step"), 1, 0)
         self.scale_step_spin = QDoubleSpinBox()
         self.scale_step_spin.setRange(0.001, 1.0)
         self.scale_step_spin.setValue(0.05)
-        scale_step_layout.addWidget(self.scale_step_spin)
+        scale_form.addWidget(self.scale_step_spin, 1, 1, 1, 3)
         btn_minus = QPushButton("Scale -")
         btn_minus.clicked.connect(lambda: self.nudge_scale(-self.scale_step_spin.value()))
         btn_plus = QPushButton("Scale +")
         btn_plus.clicked.connect(lambda: self.nudge_scale(self.scale_step_spin.value()))
-        scale_step_layout.addWidget(btn_minus)
-        scale_step_layout.addWidget(btn_plus)
-        coord_layout.addLayout(scale_step_layout)
+        scale_form.addWidget(btn_minus, 2, 1)
+        scale_form.addWidget(btn_plus, 2, 2)
+
+        scale_group.setLayout(scale_form)
+        coord_layout.addWidget(scale_group)
+
+        # Apply 버튼
+        self.apply_coord_btn = QPushButton("Apply Coord")
+        self.apply_coord_btn.clicked.connect(self.apply_coord_settings)
+        coord_layout.addWidget(self.apply_coord_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         coord_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         coord_tab = QWidget()
@@ -449,7 +484,7 @@ class MainWindow(QMainWindow):
         # IR 화점 탐지 설정
         ir_fire_cfg = (self.controller.ir_cfg if self.controller else {}).copy()
         ir_fire_box = QGroupBox("IR Hotspot Settings")
-        ir_fire_layout = QHBoxLayout()
+        ir_fire_layout = QGridLayout()
         ir_fire_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         _compact_layout(ir_fire_layout, margins=(8, 6, 8, 6), h_spacing=6, v_spacing=6)
         self.ir_fire_chk = QCheckBox("Fire Detection")
@@ -474,16 +509,18 @@ class MainWindow(QMainWindow):
         self.apply_ir_fire_btn = QPushButton("Apply IR Hotspot")
         self.apply_ir_fire_btn.clicked.connect(self.apply_ir_fire_settings)
 
-        ir_fire_layout.addWidget(self.ir_fire_chk)
-        ir_fire_layout.addWidget(QLabel("MinTemp(C)"))
-        ir_fire_layout.addWidget(self.ir_fire_min)
-        ir_fire_layout.addWidget(QLabel("Thr(C)"))
-        ir_fire_layout.addWidget(self.ir_fire_thr)
-        ir_fire_layout.addWidget(QLabel("RawThr(C)"))
-        ir_fire_layout.addWidget(self.ir_fire_raw)
-        ir_fire_layout.addWidget(QLabel("Tau"))
-        ir_fire_layout.addWidget(self.ir_tau)
-        ir_fire_layout.addWidget(self.apply_ir_fire_btn)
+        ir_fire_layout.addWidget(self.ir_fire_chk, 0, 0, 1, 2)
+        ir_fire_layout.addWidget(QLabel("MinTemp(C)"), 1, 0)
+        ir_fire_layout.addWidget(self.ir_fire_min, 1, 1)
+        ir_fire_layout.addWidget(QLabel("Thr(C)"), 1, 2)
+        ir_fire_layout.addWidget(self.ir_fire_thr, 1, 3)
+        ir_fire_layout.addWidget(QLabel("RawThr(C)"), 2, 0)
+        ir_fire_layout.addWidget(self.ir_fire_raw, 2, 1)
+        ir_fire_layout.addWidget(QLabel("Tau"), 2, 2)
+        ir_fire_layout.addWidget(self.ir_tau, 2, 3)
+        ir_fire_layout.setColumnStretch(1, 1)
+        ir_fire_layout.setColumnStretch(3, 1)
+        ir_fire_layout.addWidget(self.apply_ir_fire_btn, 3, 0, 1, 4, alignment=Qt.AlignmentFlag.AlignLeft)
         ir_fire_box.setLayout(ir_fire_layout)
         ir_tab = QWidget()
         ir_tab_layout = QVBoxLayout(ir_tab)
@@ -536,17 +573,20 @@ class MainWindow(QMainWindow):
         preview_grid.addLayout(preview_block(self.rgb_label, self.rgb_info), 0, 0)
         preview_grid.addLayout(preview_block(self.det_label, self.det_info), 0, 1)
         preview_grid.addLayout(preview_block(self.ir_label, self.ir_info), 1, 0)
-        self.overlay_label = QLabel("Overlay Preview")
-        self.overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.overlay_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.overlay_label = StablePreviewLabel("Overlay Preview")
         self.overlay_info = QLabel("-")
         self.overlay_info.setWordWrap(True)
+        _fix_label_height(self.overlay_info, lines=2)
+        self.overlay_info.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.overlay_info.setMinimumWidth(200)
         overlay_block = QVBoxLayout()
         overlay_block.addWidget(self.overlay_label)
         overlay_block.addWidget(self.overlay_info)
         preview_grid.addLayout(overlay_block, 1, 1)
         preview_grid.setColumnStretch(0, 1)
         preview_grid.setColumnStretch(1, 1)
+        preview_grid.setRowStretch(0, 1)
+        preview_grid.setRowStretch(1, 1)
 
         # --- Tabs for settings ---
         tabs = QTabWidget()
@@ -561,21 +601,29 @@ class MainWindow(QMainWindow):
 
         left_widget = QWidget()
         left_widget.setLayout(preview_grid)
+        left_widget.setMinimumWidth(640)
 
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.addWidget(self.status_label)
-        right_layout.addLayout(btn_layout)
-        right_layout.addWidget(tabs)
+        right_top_layout = QVBoxLayout()
+        right_top_layout.addWidget(self.status_label)
+        right_top_layout.addLayout(btn_layout)
+        right_top_layout.addWidget(tabs)
+
+        right_bottom_layout = QVBoxLayout()
+        right_bottom_layout.setAlignment(Qt.AlignmentFlag.AlignBottom)
         if self.rgb_plot and self.ir_plot:
             plot_layout = QHBoxLayout()
             if self.det_plot:
                 plot_layout.addWidget(self.det_plot)
             plot_layout.addWidget(self.rgb_plot)
             plot_layout.addWidget(self.ir_plot)
-            right_layout.addLayout(plot_layout)
-        right_layout.addWidget(self.log_view)
+            right_bottom_layout.addLayout(plot_layout)
+        right_bottom_layout.addWidget(self.log_view)
+
+        right_layout.addLayout(right_top_layout)
         right_layout.addStretch()
+        right_layout.addLayout(right_bottom_layout)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_widget)
@@ -740,7 +788,7 @@ class MainWindow(QMainWindow):
         # UI 동기화
         self.offset_x_spin.setValue(params.get('offset_x', self.offset_x_spin.value()))
         self.offset_y_spin.setValue(params.get('offset_y', self.offset_y_spin.value()))
-        self.scale_spin.setValue(params.get('scale'))
+        self.scale_spin.setValue(params.get('scale', self.scale_spin.value()))
         self.append_log(f"Coord updated: {params}")
 
     def apply_ir_fire_settings(self):
@@ -837,6 +885,9 @@ class MainWindow(QMainWindow):
             self.offset_y_spin.setValue(params.get('offset_y', self.offset_y_spin.value()))
             if params.get('scale') is not None:
                 self.scale_spin.setValue(params.get('scale'))
+            else:
+                # 컨트롤러에 scale이 None이면 UI는 기본 1.0 유지
+                self.scale_spin.setValue(max(0.1, self.scale_spin.value()))
         finally:
             self.offset_x_spin.blockSignals(False)
             self.offset_y_spin.blockSignals(False)
@@ -882,6 +933,23 @@ class MainWindow(QMainWindow):
             self.rgb_ts_history.append(t_rgb)
         if t_ir:
             self.ir_ts_history.append(t_ir)
+
+        # 초기 scale이 None인 경우 프레임 크기로 자동 계산해 한 번만 UI/컨트롤러에 반영
+        if self.controller and not self._coord_auto_set and rgb_frame is not None and ir_frame is not None:
+            coord = self.controller.get_coord_cfg()
+            if coord.get('scale') is None:
+                try:
+                    auto_scale = min(rgb_frame.shape[1] / ir_frame.shape[1], rgb_frame.shape[0] / ir_frame.shape[0])
+                    if auto_scale > 0:
+                        updated = dict(coord, scale=auto_scale)
+                        self.controller.set_coord_cfg(updated)
+                        self.scale_spin.blockSignals(True)
+                        self.scale_spin.setValue(auto_scale)
+                        self.scale_spin.blockSignals(False)
+                        self._coord_auto_set = True
+                        self.append_log(f"Coord scale auto-set: {auto_scale:.3f}")
+                except Exception:
+                    pass
 
         self._sync_coord_ui()
 
@@ -969,10 +1037,14 @@ class MainWindow(QMainWindow):
             sync_state = f"SYNC: {'OK' if diff <= max_diff else f'WARN ({diff:.0f}ms)'}"
         else:
             sync_state = "SYNC: N/A"
-        status_text = " | ".join(status) if status else "Status: -"
-        self.status_label.setText(
-            f"{sender_state} | Det {det_fps:.1f} FPS | IR {ir_fps:.1f} FPS | RGB in {rgb_fps:.1f} FPS | {sync_state} | {status_text}"
-        )
+        # 상태 라벨: 3줄 고정 포맷으로 높이 변동 방지
+        line1 = f"{sender_state} | {sync_state} | MaxDiff={max_diff}ms"
+        line2 = f"Det {det_fps:.1f} FPS | IR {ir_fps:.1f} FPS | RGB {rgb_fps:.1f} FPS"
+        ts_det = det_item[1] if det_item else "-"
+        ts_rgb = rgb_item[1] if rgb_item else "-"
+        ts_ir = ir_item[1] if ir_item else "-"
+        line3 = f"TS det={ts_det} | rgb={ts_rgb} | ir={ts_ir}"
+        self.status_label.setText("\n".join([line1, line2, line3]))
         if self.det_plot:
             self.det_plot.update_value(det_fps)
         if self.rgb_plot:

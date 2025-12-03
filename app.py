@@ -114,6 +114,26 @@ def parse_args():
                         help="실행 모드 선택 (cli | gui), 기본값은 APP_MODE 또는 cli")
     return parser.parse_args()
 
+def _normalize_coord_cfg(params):
+    """CONFIG의 COORD 키(대문자/소문자)를 런타임에서 쓰는 소문자 키로 정규화"""
+    cfg = dict(params or {})
+    def _get(key, default=None):
+        val = cfg.get(key)
+        if val is None:
+            val = cfg.get(key.upper(), default)
+        return val if val is not None else default
+    out = {
+        'offset_x': float(_get('offset_x', 0.0)),
+        'offset_y': float(_get('offset_y', 0.0)),
+        'scale': _get('scale', None),
+    }
+    if out['scale'] is not None:
+        try:
+            out['scale'] = float(out['scale'])
+        except Exception:
+            out['scale'] = None
+    return out
+
 
 class CoordState:
     def __init__(self, params=None):
@@ -138,7 +158,7 @@ class RuntimeController:
         self.sync_cfg = sync_cfg
         self.display_cfg = display_cfg
         self.target_res = target_res
-        self.coord_state = CoordState(coord_cfg)
+        self.coord_state = CoordState(_normalize_coord_cfg(coord_cfg))
         self.capture_cfg = capture_cfg or {}
         self.cfg = cfg or {}
         self.sender_thread = None
