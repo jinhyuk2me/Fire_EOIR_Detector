@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
 
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
-        self.log_view.setMaximumHeight(120)
+        self.log_view.setMinimumHeight(120)
 
         self.det_plot = RollingPlot(title="Det FPS") if RollingPlot else None
         self.rgb_plot = RollingPlot(title="RGB FPS") if RollingPlot else None
@@ -617,20 +617,8 @@ class MainWindow(QMainWindow):
         right_top_layout.addLayout(btn_layout)
         right_top_layout.addWidget(tabs)
 
-        right_bottom_layout = QVBoxLayout()
-        right_bottom_layout.setAlignment(Qt.AlignmentFlag.AlignBottom)
-        if self.rgb_plot and self.ir_plot:
-            plot_layout = QHBoxLayout()
-            if self.det_plot:
-                plot_layout.addWidget(self.det_plot)
-            plot_layout.addWidget(self.rgb_plot)
-            plot_layout.addWidget(self.ir_plot)
-            right_bottom_layout.addLayout(plot_layout)
-        right_bottom_layout.addWidget(self.log_view)
-
         right_layout.addLayout(right_top_layout)
         right_layout.addStretch()
-        right_layout.addLayout(right_bottom_layout)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_widget)
@@ -638,7 +626,25 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
 
-        main_layout.addWidget(splitter)
+        # 하단 글로벌 영역: 플롯 + 로그를 전체 폭으로 배치 (세로 스플리터로 높이 조절 가능)
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        if self.rgb_plot and self.ir_plot:
+            plot_layout = QHBoxLayout()
+            if self.det_plot:
+                plot_layout.addWidget(self.det_plot)
+            plot_layout.addWidget(self.rgb_plot)
+            plot_layout.addWidget(self.ir_plot)
+            bottom_layout.addLayout(plot_layout)
+        bottom_layout.addWidget(self.log_view)
+
+        v_splitter = QSplitter(Qt.Orientation.Vertical)
+        v_splitter.addWidget(splitter)
+        v_splitter.addWidget(bottom_widget)
+        v_splitter.setStretchFactor(0, 5)
+        v_splitter.setStretchFactor(1, 1)
+
+        main_layout.addWidget(v_splitter)
 
         # (log plot 추가 시 main_layout 쪽은 splitter로 대체했으므로 제거)
 
