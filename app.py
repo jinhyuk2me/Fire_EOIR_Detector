@@ -16,7 +16,12 @@ from configs.get_cfg import get_cfg, ConfigError
 from camera.source_factory import create_rgb_source, create_ir_source
 from detector.tflite import TFLiteWorker
 from core.buffer import DoubleBuffer
-from core.state import camera_state
+from core.state import (
+    camera_state,
+    LabelScaleState,
+    DEFAULT_LABEL_SCALE,
+    LABEL_SCALE_STEP,
+)
 from display import display_loop
 
 logger = logging.getLogger(__name__)
@@ -94,6 +99,8 @@ def print_help():
     print("    [1] Rotate IR 90 degrees (clockwise)")
     print("    [2] Toggle IR horizontal flip (left-right)")
     print("    [3] Toggle IR vertical flip (up-down)")
+    print("    [g] Decrease IR tau (atmospheric transmittance)")
+    print("    [t] Increase IR tau (atmospheric transmittance)")
     print("-" * 55)
     print("  RGB Camera:")
     print("    [4] Rotate RGB 90 degrees (clockwise)")
@@ -103,6 +110,11 @@ def print_help():
     print("  Both Cameras:")
     print("    [7] Toggle BOTH horizontal flip")
     print("    [8] Toggle BOTH vertical flip")
+    print("-" * 55)
+    print("  Detection Overlay:")
+    print("    [,] Decrease overlay label scale")
+    print("    [.] Increase overlay label scale")
+    print("    [0] Reset overlay label scale")
     print("-" * 55)
     print("  [s] Show current status")
     print("  [h] Show this help message")
@@ -167,6 +179,7 @@ class RuntimeController:
         self.display_cfg = display_cfg
         self.target_res = target_res
         self.coord_state = CoordState(_normalize_coord_cfg(coord_cfg))
+        self.label_state = LabelScaleState(DEFAULT_LABEL_SCALE)
         self.capture_cfg = capture_cfg or {}
         self.cfg = cfg or {}
         self.sender_thread = None
@@ -210,6 +223,7 @@ class RuntimeController:
             "sync_cfg": self.sync_cfg,
             "stop_event": self.sender_stop,
             "coord_state": self.coord_state,
+            "label_state": self.label_state,
         }
         return self._start_thread(
             "sender",
@@ -306,6 +320,19 @@ class RuntimeController:
 
     def set_coord_cfg(self, params):
         self.coord_state.update(**params)
+
+    def get_label_scale(self):
+        return self.label_state.get() if self.label_state else DEFAULT_LABEL_SCALE
+
+    def adjust_label_scale(self, delta):
+        if not self.label_state:
+            return None
+        return self.label_state.adjust(delta)
+
+    def reset_label_scale(self):
+        if not self.label_state:
+            return None
+        return self.label_state.reset()
 
     def get_sync_cfg(self):
         return dict(self.sync_cfg or {})
@@ -603,6 +630,28 @@ def _run_cli(ctx):
             elif key == '8':
                 state = camera_state.toggle_flip_v_both()
                 logger.info("[BOTH] Vertical flip: %s", "ON" if state else "OFF")
+            elif key in ('g', '-'):
+                cur_tau = float(controller.ir_cfg.get('TAU', 0.95) or 0.95)
+                new_tau = max(0.1, cur_tau - 0.05)
+                controller.update_ir_fire_cfg(tau=new_tau)
+                logger.info("[IR] Tau: %.3f → %.3f", cur_tau, new_tau)
+            elif key in ('t', '+'):
+                cur_tau = float(controller.ir_cfg.get('TAU', 0.95) or 0.95)
+                new_tau = min(1.0, cur_tau + 0.05)
+                controller.update_ir_fire_cfg(tau=new_tau)
+                logger.info("[IR] Tau: %.3f → %.3f", cur_tau, new_tau)
+            elif key in (',', '<'):
+                new_scale = controller.adjust_label_scale(-LABEL_SCALE_STEP)
+                if new_scale is not None:
+                    logger.info("[Overlay] Label scale: %.2fx (↓)", new_scale)
+            elif key in ('.', '>'):
+                new_scale = controller.adjust_label_scale(LABEL_SCALE_STEP)
+                if new_scale is not None:
+                    logger.info("[Overlay] Label scale: %.2fx (↑)", new_scale)
+            elif key == '0':
+                new_scale = controller.reset_label_scale()
+                if new_scale is not None:
+                    logger.info("[Overlay] Label scale reset → %.2fx", new_scale)
             elif key == 's':
                 status = camera_state.get_status()
                 ir = status['ir']
@@ -611,10 +660,12 @@ def _run_cli(ctx):
                     "[Status] IR rotate=%3d flip_h=%s flip_v=%s",
                     ir['rotate'], "ON" if ir['flip_h'] else "OFF", "ON" if ir['flip_v'] else "OFF"
                 )
+                logger.info("[Status] IR tau=%.3f", float(controller.ir_cfg.get('TAU', 0.95) or 0.95))
                 logger.info(
                     "[Status] RGB rotate=%3d flip_h=%s flip_v=%s",
                     rgb['rotate'], "ON" if rgb['flip_h'] else "OFF", "ON" if rgb['flip_v'] else "OFF"
                 )
+                logger.info("[Status] Overlay label scale=%.2fx", controller.get_label_scale())
             elif key == 'h':
                 print_help()
             elif key == 'q':

@@ -13,6 +13,13 @@ import os
 from datetime import datetime
 
 from core.fire_fusion import FireFusion, draw_fire_annotations, apply_vis_mode
+from core.state import (
+    LabelScaleState,
+    DEFAULT_LABEL_SCALE,
+    MIN_LABEL_SCALE,
+    MAX_LABEL_SCALE,
+    LABEL_SCALE_STEP,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +30,7 @@ REQUIRED_IMAGES = {
 
 
 class ImageSender:
-    def __init__(self, host='localhost', port=9999, max_packet_mb=2.0):
+    def __init__(self, host='localhost', port=9999, max_packet_mb=2.0, label_state=None):
         self.host = host
         self.port = port
         self.sock = None
@@ -32,6 +39,8 @@ class ImageSender:
         self.saving_mode = False  # Receiver의 저장 상태
         self.control_lock = threading.Lock()
         self.max_packet_bytes = int(max_packet_mb * 1024 * 1024)
+        self.label_state = label_state
+        self._label_scale = DEFAULT_LABEL_SCALE
         
     def connect(self):
         """서버에 연결"""
@@ -95,6 +104,15 @@ class ImageSender:
                 elif command == 'stop_saving':
                     self.saving_mode = False
                     logger.info("Saving mode DISABLED - Sending only RGB_DET + IR")
+                elif command == 'label_scale_up':
+                    new_scale = self._adjust_label_scale(delta=LABEL_SCALE_STEP)
+                    logger.info("Label scale increased to %.2f", new_scale)
+                elif command == 'label_scale_down':
+                    new_scale = self._adjust_label_scale(delta=-LABEL_SCALE_STEP)
+                    logger.info("Label scale decreased to %.2f", new_scale)
+                elif command == 'label_scale_reset':
+                    new_scale = self._adjust_label_scale(reset=True)
+                    logger.info("Label scale reset to %.2f", new_scale)
         except BlockingIOError:
             # 데이터가 없음 (정상)
             pass
@@ -149,6 +167,28 @@ class ImageSender:
                 pass
             logger.info("Connection closed")
 
+    def _adjust_label_scale(self, delta=None, reset=False):
+        if self.label_state:
+            if reset:
+                return self.label_state.reset()
+            if delta is not None:
+                return self.label_state.adjust(delta)
+            return self.label_state.get()
+        if reset:
+            self._label_scale = DEFAULT_LABEL_SCALE
+        elif delta is not None:
+            self._label_scale = max(
+                MIN_LABEL_SCALE,
+                min(MAX_LABEL_SCALE, self._label_scale + delta),
+            )
+        return self._label_scale
+
+    def get_label_scale(self):
+        if self.label_state:
+            return self.label_state.get()
+        with self.control_lock:
+            return self._label_scale
+
 
 def _ts_to_epoch_ms(ts):
     if not ts:
@@ -161,7 +201,7 @@ def _ts_to_epoch_ms(ts):
 
 def send_images(d_rgb, d_ir, d16_ir, d_rgb_det, host='localhost', port=5000,
                 jpeg_quality=70, resize_factor=1, sync_cfg=None, stop_event=None,
-                coord_state=None):
+                coord_state=None, label_state=None):
     """
     이미지 버퍼를 읽어서 TCP 소켓으로 전송 (JSON+zlib+base64)
     - 최신 프레임만 전송하여 적체를 방지
@@ -177,7 +217,8 @@ def send_images(d_rgb, d_ir, d16_ir, d_rgb_det, host='localhost', port=5000,
         jpeg_quality: JPEG 압축 품질 (0-100, 낮을수록 빠름)
         resize_factor: 전송 전 리사이즈 비율 (2=1/2, 3=1/3, 1=원본)
     """
-    sender = ImageSender(host, port)
+    label_state = label_state or LabelScaleState(DEFAULT_LABEL_SCALE)
+    sender = ImageSender(host, port, label_state=label_state)
     
     # 연결 재시도 (초기)
     max_retries = 5
@@ -336,6 +377,9 @@ def send_images(d_rgb, d_ir, d16_ir, d_rgb_det, host='localhost', port=5000,
                 # IR hotspots 추출 (ir_item[3]에 저장됨)
                 if len(ir_item) > 3:
                     last_ir_hotspots = ir_item[3]
+                tau_val = None
+                if isinstance(max_temp_info, dict) and 'tau' in max_temp_info:
+                    tau_val = max_temp_info['tau']
                 
                 packet['images']['ir'] = {
                     'data_b64': _b64(ir_frame.tobytes()),
@@ -344,7 +388,8 @@ def send_images(d_rgb, d_ir, d16_ir, d_rgb_det, host='localhost', port=5000,
                     'dtype': str(ir_frame.dtype),
                     'timestamp': ir_item[1] if len(ir_item) > 1 else 0,
                     'updated': ir_updated,  # 업데이트 여부 표시
-                    'max_temp': max_temp_info  # 최고 온도 정보 (x, y, temp_raw, temp_corrected)
+                    'max_temp': max_temp_info,  # 최고 온도 정보 (x, y, temp_raw, temp_corrected)
+                    'tau': tau_val,             # 사용된 대기 투과율 (표시용)
                 }
                 if ir_updated:
                     ir_frame_count += 1
@@ -385,7 +430,17 @@ def send_images(d_rgb, d_ir, d16_ir, d_rgb_det, host='localhost', port=5000,
                     )
                     fusion_result['eo_annotations'] = anns
                     if anns:
-                        rgb_det_frame = draw_fire_annotations(rgb_det_frame, anns)
+                        if label_state:
+                            current_label_scale = label_state.get()
+                        else:
+                            current_label_scale = sender.get_label_scale()
+                        thickness_scale = current_label_scale / DEFAULT_LABEL_SCALE if DEFAULT_LABEL_SCALE else 1.0
+                        rgb_det_frame = draw_fire_annotations(
+                            rgb_det_frame,
+                            anns,
+                            font_scale=current_label_scale,
+                            thickness_scale=thickness_scale,
+                        )
                 
                 # 리사이즈
                 if resize_factor > 1:

@@ -3,7 +3,7 @@ CAMERA:
     FPS: 9
     RES: [160, 120]
     SLEEP: 0.11
-    TAU: 0.95               # 대기 투과율 (실내: 0.95, 야외장거리: 0.3~0.7)
+    TAU: 0.5               # 대기 투과율 (실내: 0.95, 야외장거리: 0.3~0.7)
     FIRE_DETECTION: true     # 화점 탐지 활성화
     FIRE_MIN_TEMP: 80        # 화점 최소 온도 (섭씨)
     FIRE_THR: 20             # 보정 온도 임계값 (최고-평균)
@@ -43,7 +43,7 @@ INPUT:
     LOOP: true
     FRAME_INTERVAL_MS: null
 STATE:
-  FIRE: {NMS: 0.1, WINDOW: 50, THRESHOLD: 60, CONFIDENCE: 0.2, MIN_DUR: 10.0, ACTIVE_DUR: 2.0,
+  FIRE: {NMS: 0.1, WINDOW: 50, THRESHOLD: 60, CONFIDENCE: 0.01, MIN_DUR: 10.0, ACTIVE_DUR: 2.0,
     INACTIVE_DUR: 10.0, DET_MODE: 1}
   BUFFERS: {RAW16: 100, RAW: 50, DET: 100}
   DET_SLEEP: 0.11

@@ -1,6 +1,11 @@
 # core/state.py
 import threading
 
+DEFAULT_LABEL_SCALE = 0.8
+MIN_LABEL_SCALE = 0.4
+MAX_LABEL_SCALE = 2.0
+LABEL_SCALE_STEP = 0.1
+
 
 class CameraState:
     """
@@ -126,3 +131,31 @@ class CameraState:
 
 # 전역 인스턴스
 camera_state = CameraState()
+
+
+class LabelScaleState:
+    """RGB 검출 오버레이 라벨 크기 공유 상태"""
+
+    def __init__(self, value=DEFAULT_LABEL_SCALE):
+        self._lock = threading.Lock()
+        self._value = float(value)
+
+    def _clamp(self, value):
+        return max(MIN_LABEL_SCALE, min(MAX_LABEL_SCALE, float(value)))
+
+    def get(self):
+        with self._lock:
+            return self._value
+
+    def set(self, value):
+        with self._lock:
+            self._value = self._clamp(value)
+            return self._value
+
+    def adjust(self, delta):
+        with self._lock:
+            self._value = self._clamp(self._value + float(delta))
+            return self._value
+
+    def reset(self):
+        return self.set(DEFAULT_LABEL_SCALE)

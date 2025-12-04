@@ -79,13 +79,19 @@ def _draw_max_temp_text(frame, ir_entry):
         frame = frame.copy()
 
     meta = ir_entry.get("max_temp") or {}
+    if "tau" not in meta and ir_entry.get("tau") is not None:
+        meta = dict(meta)
+        meta["tau"] = ir_entry.get("tau")
     temp = meta.get("temp_corrected", meta.get("temp_raw"))
     if temp is None:
         return frame
 
+    tau = meta.get("tau")
     text = f"Max {temp:.1f}C"
     if meta.get("min_temp") is not None:
         text += f" / Min {meta['min_temp']:.1f}C"
+    if tau is not None:
+        text += f" | tau {float(tau):.3f}"
 
     h, w = frame.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -235,6 +241,7 @@ def receive_and_display(host="0.0.0.0", port=9999):
     loop_times = []
     ir_scale = 1.0
     rgb_scale = 1.0
+    label_scale_factor = 1.0
 
     try:
         while True:
@@ -378,6 +385,24 @@ def receive_and_display(host="0.0.0.0", port=9999):
             elif key == ord("}"):  # RGB_det 확대
                 rgb_scale = min(4.0, rgb_scale + 0.1)
                 print(f"[Receiver] RGB_det scale: {rgb_scale:.2f}")
+            elif key in (ord("."), ord(">")):
+                if receiver.send_control_command("label_scale_up"):
+                    label_scale_factor = min(3.0, label_scale_factor + 0.1)
+                    print(f"[Receiver] Label scale ↑ ('.') → {label_scale_factor:.2f}x")
+                else:
+                    print("[Receiver] Label scale up command failed")
+            elif key in (ord(","), ord("<")):
+                if receiver.send_control_command("label_scale_down"):
+                    label_scale_factor = max(0.3, label_scale_factor - 0.1)
+                    print(f"[Receiver] Label scale ↓ (',') → {label_scale_factor:.2f}x")
+                else:
+                    print("[Receiver] Label scale down command failed")
+            elif key == ord("0"):
+                if receiver.send_control_command("label_scale_reset"):
+                    label_scale_factor = 1.0
+                    print("[Receiver] Label scale reset")
+                else:
+                    print("[Receiver] Label scale reset command failed")
 
             if saving:
                 save_rgb = _decode_image(images.get("rgb"))

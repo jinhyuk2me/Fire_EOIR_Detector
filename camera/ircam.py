@@ -270,13 +270,15 @@ class IRCamera(FrameSource):
                 'x': int,              # 최고온도 x좌표 (픽셀)
                 'y': int,              # 최고온도 y좌표 (픽셀)
                 'temp_raw': float,     # 보정 전 온도 (섭씨)
-                'temp_corrected': float # 보정 후 온도 (섭씨)
+                'temp_corrected': float, # 보정 후 온도 (섭씨)
+                'tau': float            # 사용된 대기 투과율
             }
         """
         try:
             # config에서 tau 사용 (인자로 전달되지 않은 경우)
             if tau is None:
                 tau = self.tau
+            tau_val = float(tau)
             
             # 온도 변환 상수
             T_atm_K = 295.15   # 대기 온도 (약 22도C)
@@ -303,7 +305,8 @@ class IRCamera(FrameSource):
                 'y': y,
                 'min_temp': round(float(temp_corrected[y_min, x_min]), 2),
                 'temp_raw': round(float(temp_raw[y, x]), 2),
-                'temp_corrected': round(float(temp_corrected[y, x]), 2)
+                'temp_corrected': round(float(temp_corrected[y, x]), 2),
+                'tau': round(tau_val, 3),
             }
         except Exception:
             return None

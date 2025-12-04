@@ -262,18 +262,29 @@ class FireFusion:
         return self.coord_mapper.get_params()
 
 
-def draw_fire_annotations(frame, annotations):
+def draw_fire_annotations(frame, annotations, font_scale=0.8, thickness_scale=1.0):
     """
     화재 감지 결과를 프레임에 그리기
     
     Args:
         frame: BGR 이미지 (numpy array)
         annotations: eo_annotations 리스트
+        font_scale: cv2.putText에 사용할 폰트 스케일
+        thickness_scale: 박스/텍스트 두께 스케일 (1.0이 기본)
         
     Returns:
         frame: annotation이 그려진 이미지
     """
     import cv2
+    
+    if frame is None:
+        return frame
+    
+    font_scale = max(0.2, float(font_scale or 0.8))
+    thickness_scale = max(0.5, float(thickness_scale or 1.0))
+    base_box_thickness = max(1, int(round(2 * thickness_scale)))
+    text_thickness = max(1, int(round(1.5 * thickness_scale)))
+    text_outline_thickness = text_thickness + 2
     
     for ann in annotations:
         bbox = ann['bbox']
@@ -284,15 +295,14 @@ def draw_fire_annotations(frame, annotations):
         x, y, w, h = [int(v) for v in bbox]
         
         # bbox 그리기
-        thickness = 3 if status == FIRE_CONFIRMED else 2
+        thickness = base_box_thickness + 1 if status == FIRE_CONFIRMED else base_box_thickness
         cv2.rectangle(frame, (x, y), (x + w, y + h), color, thickness)
         
         # 라벨 그리기
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.6
-        text_y = max(0, y - 6)
-        cv2.putText(frame, label, (x, text_y), font, 0.8, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(frame, label, (x, text_y), font, 0.8, (255, 255, 255), 1, cv2.LINE_AA)
+        text_y = max(0, int(y - 6 * thickness_scale))
+        cv2.putText(frame, label, (x, text_y), font, font_scale, (0, 0, 0), text_outline_thickness, cv2.LINE_AA)
+        cv2.putText(frame, label, (x, text_y), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
     
     return frame
 
