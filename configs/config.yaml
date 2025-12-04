@@ -9,11 +9,17 @@ CAMERA:
     FIRE_THR: 20             # 보정 온도 임계값 (최고-평균)
     FIRE_RAW_THR: 5          # raw 온도 임계값 (최고-평균)
     DEVICE: "/dev/video3"
+    ROTATE: 0                # 회전 (0, 90, 180, 270)
+    FLIP_H: false            # 좌우반전
+    FLIP_V: false            # 상하반전
   RGB_FRONT:
-    FPS: 30
-    RES: [1920, 1080]
-    SLEEP: 0.033
+    FPS: 15
+    RES: [320, 240]
+    SLEEP: 0.066
     DEVICE: "/dev/video5"
+    ROTATE: 0                # 회전 (0, 90, 180, 270)
+    FLIP_H: false            # 좌우반전
+    FLIP_V: false            # 상하반전
   RGB_PC:
     FPS: 30
     RES: [1280, 720]
@@ -30,7 +36,7 @@ INPUT:
     LOOP: true
     FRAME_INTERVAL_MS: null
     COLOR: [0, 255, 0]
-    DEVICE: null        # PC에서 내장 웹캠 사용 시 인덱스 입력 (예: 0)
+    # DEVICE: null      # PC에서 내장 웹캠 사용 시 인덱스 입력 (예: 0) - 주석처리하면 CAMERA.RGB_FRONT.DEVICE 사용
   IR:
     MODE: live
     VIDEO_PATH: ""
@@ -42,7 +48,7 @@ STATE:
   BUFFERS: {RAW16: 100, RAW: 50, DET: 100}
   DET_SLEEP: 0.11
 SERVER:
-  IP: '192.168.10.1'
+  IP: '192.168.50.178'
   PORT: 9999
   COMP_RATIO: 70
 DISPLAY:

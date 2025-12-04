@@ -390,12 +390,14 @@ def send_images(d_rgb, d_ir, d16_ir, d_rgb_det, host='localhost', port=5000,
                 # 리사이즈
                 if resize_factor > 1:
                     h, w = rgb_det_frame.shape[:2]
-                    rgb_det_frame = cv2.resize(rgb_det_frame, (w//resize_factor, h//resize_factor), 
+                    rgb_det_frame = cv2.resize(rgb_det_frame, (w//resize_factor, h//resize_factor),
                                                interpolation=cv2.INTER_LINEAR)
-                
+
+                # JPEG 압축
+                _, encoded = cv2.imencode('.jpg', rgb_det_frame, encode_param)
                 packet['images']['rgb_det'] = {
-                    'data_b64': _b64(rgb_det_frame.tobytes()),
-                    'compressed': False,
+                    'data_b64': _b64(encoded.tobytes()),
+                    'compressed': True,
                     'shape': rgb_det_frame.shape,
                     'dtype': str(rgb_det_frame.dtype),
                     'timestamp': rgb_det_item[1] if len(rgb_det_item) > 1 else 0,

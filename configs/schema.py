@@ -14,6 +14,9 @@ class CameraConfig:
     FIRE_RAW_THR: Optional[float] = None
     TAU: Optional[float] = None
     DEVICE_OVERRIDE: Optional[str] = None
+    ROTATE: Optional[int] = 0
+    FLIP_H: Optional[bool] = False
+    FLIP_V: Optional[bool] = False
 
 
 @dataclass

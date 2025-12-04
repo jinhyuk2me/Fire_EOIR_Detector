@@ -484,6 +484,16 @@ def _init_pipeline(gui_mode=False):
     delegate = cfg.DELEGATE
     ir_cfg = cfg.CAMERA_IR.__dict__
     rgb_cfg = cfg.CAMERA_RGB_FRONT.__dict__
+
+    # 카메라 회전/반전 설정 적용
+    with camera_state._state_lock:
+        camera_state._rotate_ir = ir_cfg.get('ROTATE', 0)
+        camera_state._flip_h_ir = ir_cfg.get('FLIP_H', False)
+        camera_state._flip_v_ir = ir_cfg.get('FLIP_V', False)
+        camera_state._rotate_rgb = rgb_cfg.get('ROTATE', 0)
+        camera_state._flip_h_rgb = rgb_cfg.get('FLIP_H', False)
+        camera_state._flip_v_rgb = rgb_cfg.get('FLIP_V', False)
+
     state = cfg.STATE
     target_res = tuple(cfg.TARGET_RES)
     display_cfg = cfg.DISPLAY

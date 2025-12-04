@@ -152,6 +152,11 @@ class RGBCamera(FrameSource):
     def capture(self):
         ret, frame = self.cap.read()
         if not ret or frame is None:
+            if not hasattr(self, '_cap_fail_count'):
+                self._cap_fail_count = 0
+            self._cap_fail_count += 1
+            if self._cap_fail_count % 100 == 1:
+                _log(f"Capture failed (count: {self._cap_fail_count})")
             return None, None
         
         # 프레임 유효성 검사 (너무 작은 해상도/채널 오류 방지)
@@ -193,9 +198,10 @@ class RGBCamera(FrameSource):
         return self.thread
 
     def _loop(self):
+        frame_count = 0
         while not self.stop_event.is_set():
             s_time = time.time()
-    
+
             frame, ts = self.capture()
             if frame is None:
                 dyn_sleep(s_time, self.sleep); continue
@@ -204,6 +210,9 @@ class RGBCamera(FrameSource):
                 dyn_sleep(s_time, self.sleep); continue
 
             self.d_buffer.write((frame, ts))
+            frame_count += 1
+            if frame_count % 100 == 0:
+                _log(f"Captured {frame_count} frames")
         
             self.last_ts = ts
                 

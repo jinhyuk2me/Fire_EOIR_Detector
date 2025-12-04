@@ -45,7 +45,8 @@ def _decode_image(entry):
 
     dtype = np.dtype(entry.get("dtype"))
     shape = tuple(entry.get("shape", ()))
-    arr = np.frombuffer(raw, dtype=dtype)
+    # frombuffer로 만든 배열은 읽기 전용일 수 있어 OpenCV 그리기 시 에러가 날 수 있음
+    arr = np.frombuffer(raw, dtype=dtype).copy()
     try:
         return arr.reshape(shape)
     except Exception:
@@ -66,6 +67,44 @@ def _maybe_decode_annots(entry):
     if isinstance(entry, list):
         return entry
     return []
+
+
+def _draw_max_temp_text(frame, ir_entry):
+    """IR 프레임에 최고/최저 온도 정보를 오버레이"""
+    if frame is None or not isinstance(ir_entry, dict):
+        return frame
+
+    # 일부 입력 배열이 read-only일 수 있어 쓰기 가능 사본으로 변환
+    if not frame.flags.writeable:
+        frame = frame.copy()
+
+    meta = ir_entry.get("max_temp") or {}
+    temp = meta.get("temp_corrected", meta.get("temp_raw"))
+    if temp is None:
+        return frame
+
+    text = f"Max {temp:.1f}C"
+    if meta.get("min_temp") is not None:
+        text += f" / Min {meta['min_temp']:.1f}C"
+
+    h, w = frame.shape[:2]
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.5
+    thickness = 1
+    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
+    x = max(2, w - tw - 4)
+    y = max(th + 2, h - 4)
+
+    # 배경 박스로 가독성 확보
+    cv2.rectangle(
+        frame,
+        (x - 2, y - th - baseline - 2),
+        (x + tw + 2, y + baseline + 2),
+        (0, 0, 0),
+        -1,
+    )
+    cv2.putText(frame, text, (x, y), font, scale, (0, 255, 255), thickness, cv2.LINE_AA)
+    return frame
 
 
 class ImageReceiver:
@@ -229,6 +268,7 @@ def receive_and_display(host="0.0.0.0", port=9999):
 
             ir_display = None
             rgb_det_display = None
+            ir_entry = images.get("ir") if isinstance(images.get("ir"), dict) else None
 
             t_decode_start = time.perf_counter()
             if "ir" in images:
@@ -251,6 +291,7 @@ def receive_and_display(host="0.0.0.0", port=9999):
                         new_w = max(1, int(ir_display.shape[1] * ir_scale))
                         new_h = max(1, int(ir_display.shape[0] * ir_scale))
                         ir_display = cv2.resize(ir_display, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                    ir_display = _draw_max_temp_text(ir_display, ir_entry)
                     ir_h, ir_w = ir_display.shape[:2]
                     pad_top = max(0, (target_h - ir_h) // 2)
                     pad_bottom = max(0, target_h - ir_h - pad_top)
@@ -281,6 +322,7 @@ def receive_and_display(host="0.0.0.0", port=9999):
                     new_w = max(1, int(ir_display.shape[1] * ir_scale))
                     new_h = max(1, int(ir_display.shape[0] * ir_scale))
                     ir_display = cv2.resize(ir_display, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                ir_display = _draw_max_temp_text(ir_display, ir_entry)
                 cv2.imshow("LK ROBOTICS Inc.", ir_display)
             t_display_end = time.perf_counter()
             display_times.append((t_display_end - t_display_start) * 1000)
