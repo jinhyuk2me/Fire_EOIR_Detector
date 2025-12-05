@@ -9,7 +9,6 @@ import os
 import logging
 import argparse
 
-# from vis import visualize
 from sender import send_images
 from configs.get_cfg import get_cfg, ConfigError
 
