@@ -56,6 +56,7 @@
 - GStreamer 오류: RGB 해상도 Step 제약 확인, `gst-inspect-1.0 v4l2src`
 - IR/RGB 동기화: `SYNC` 설정(`ENABLED`, `MAX_DIFF_MS`)을 조정
 - 더 자세한 로드맵/설계는 `docs/FIRE_FUSION_ROADMAP.md`, `docs/pyqt_gui_design.md` 참고
+- 코드 리팩토링 계획은 `docs/REFACTORING_ROADMAP.md` 참고
 
 ## 저장소 구조
 ```
