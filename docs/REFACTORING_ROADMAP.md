@@ -14,7 +14,7 @@
 | Phase 1 | 1-2주 | 2.5시간 | 긴급 버그/중복 제거 | 🟢 낮음 |
 | Phase 2 | 3-4주 | 7시간 | 구조 개선 | 🟡 중간 |
 | Phase 3 | 4-6주 | 12시간 | 고급 개선 | 🟠 높음 |
-| **총계** | **6-12주** | **21.5시간** | **품질 5.6→8.0** | - |
+| **총계** | **8-12주** | **21.5시간** | **품질 5.6→8.0** | - |
 
 ---
 
@@ -36,11 +36,11 @@
 
 ### 주요 문제점
 
-1. ✗ **rgbcam.py의 정확한 함수 중복** (라인 14-40과 43-69)
-2. ✗ **포괄적 except 블록으로 인한 디버깅 어려움** (7곳)
+1. ✗ **rgbcam.py의 정확한 함수 중복** (`camera/rgbcam.py:14-69`)
+2. ✗ **포괄적 except 블록으로 인한 디버깅 어려움** (sender.py 7곳, app.py 3곳, camera/purethermal/thermalcamera.py 3곳 등)
 3. ✗ **테스트 커버리지 극히 낮음** (<2%)
 4. ✗ **gui/app_gui.py 과도한 책임 집중** (1,134줄)
-5. ✗ **설정 파일 중복** (config.yaml, config_pc.yaml 90% 동일)
+5. ✗ **설정 파일 중복/불일치** (config.yaml, config_pc.yaml 구조는 유사하나 장치·모델·Delegate 값 다름)
 
 ---
 
@@ -54,7 +54,7 @@
 #### 1.1 rgbcam.py 함수 중복 제거 ⭐️⭐️⭐️
 
 **파일**: `camera/rgbcam.py`
-**문제**: 라인 14-40과 43-69에서 `_log()`, `_open_capture()` 정확히 복제
+**문제**: 14-40, 43-69에서 `_log()`, `_open_capture()` 완전 중복
 **소요 시간**: 30분
 **난이도**: ⭐ (매우 쉬움)
 
@@ -138,67 +138,119 @@ from core.util import ts_to_epoch_ms  # 추가
 
 #### 1.3 포괄적 except 블록 구체화 ⭐️⭐️⭐️
 
-**파일**:
-- `sender.py:166`
-- `app.py:66, 75, 87`
-- `camera/purethermal/thermalcamera.py:75, 186, 198`
+**파일 예시**:
+- `sender.py`: 7곳(`connect`, `check_control_command`, `send_frame_data`, main loop 등)
+- `app.py`: 3곳(`setup_keyboard`, `restore_keyboard`, `check_keyboard`)
+- `camera/purethermal/thermalcamera.py`: 3곳(`_find_usb_device_path`, `_capture_loop`, `cleanup`)
 
-**문제**: `except:` 또는 `except Exception:` 사용으로 예외 타입 불명확
+**문제**: `except:` 또는 `except Exception:` 사용으로 예외 타입 불명확. 위치별로 실제 발생 가능한 예외를 좁히고, 마지막에만 포괄 예외를 남김.
 **소요 시간**: 1시간
 **난이도**: ⭐⭐ (중간)
 
 **작업 순서**:
 
-**1.3.1 sender.py:166** (우선순위 HIGH)
+**대표 예시 1: sender.py의 connect 메서드 (HIGH 우선순위)**
 ```python
-# 현재
+# 현재 (문제)
 try:
-    ...
+    self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    self.sock.connect((host, port))
+    self.connected = True
 except:
-    pass  # ← 문제
+    pass  # ← 모든 예외 무시, 로깅 없음
 
 # 개선
 try:
-    ...
+    self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    self.sock.connect((host, port))
+    self.connected = True
+    logger.info("Connected to %s:%s", host, port)
 except socket.error as e:
-    logger.error("Socket connection error: %s", e)
+    logger.error("Socket connection failed: %s", e)
     self.connected = False
-except json.JSONDecodeError as e:
-    logger.warning("Invalid JSON packet: %s", e)
+except OSError as e:
+    logger.error("OS error during connection: %s", e)
+    self.connected = False
 except Exception as e:
-    logger.exception("Unexpected error in frame send: %s", e)
+    logger.exception("Unexpected error in connect: %s", e)
+    self.connected = False
 ```
 
-**1.3.2 app.py:66, 75** (우선순위 MEDIUM)
+**대표 예시 2: app.py의 setup_keyboard (MEDIUM 우선순위)**
 ```python
-# 현재
+# 현재 (문제)
 try:
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setcbreak(sys.stdin.fileno())
+    return old_settings
 except:
-    return None
+    return None  # ← 예외 원인 불명
 
 # 개선
+try:
+    old_settings = termios.tcgetattr(sys.stdin)
+    tty.setcbreak(sys.stdin.fileno())
+    return old_settings
 except (termios.error, AttributeError, OSError) as e:
-    logger.debug("Terminal setup failed (non-interactive): %s", e)
+    logger.debug("Terminal setup failed (non-interactive mode): %s", e)
+    return None
+except Exception as e:
+    logger.warning("Unexpected keyboard setup error: %s", e)
     return None
 ```
 
-**1.3.3 camera/purethermal/thermalcamera.py** (우선순위 LOW)
-```python
-# 3곳의 except: 블록을 구체화
-except usb.core.USBError as e:
-    logger.error("USB error: %s", e)
-except Exception as e:
-    logger.exception("Thermal camera error: %s", e)
-```
+**다른 위치 (동일 패턴 적용)**:
+- HIGH: `sender.py` 나머지 6곳 (`check_control_command`, `send_frame_data`, main loop 등) → `socket.error`, `select.error`, `json.JSONDecodeError` 등
+- MEDIUM: `app.py` 나머지 2곳 (`restore_keyboard`, `check_keyboard`) → `termios.error`, `OSError` 등
+- LOW: `camera/purethermal/thermalcamera.py` 3곳 → `subprocess.CalledProcessError`, `OSError`, `IOError` 등
 
 **위험도**: 🟡 중간 (예외 처리 로직 변경)
-**영향 범위**: 3개 파일, 7개 위치
+**영향 범위**: 3개 파일, 13개 이상 위치
 **테스트 필요**:
 - 네트워크 끊김 시나리오
 - 터미널 비대화형 모드
 - USB 장치 연결/해제
+
+---
+
+#### 1.4 RGBCamera 재연결/종료 및 로깅 일원화 ⭐️⭐️
+
+**파일**: `camera/rgbcam.py`
+**문제**:
+- 캡처 실패 시 재연결 시도 없음, `__del__` 의존
+- `print` 기반 로그로 다른 모듈(logging)과 불일치
+
+**소요 시간**: 45분
+**난이도**: ⭐⭐ (중간)
+
+**작업 순서**:
+1. `logging.getLogger(__name__)`로 로거 전환, `_log` 내 `logger.info/warning/error` 사용
+2. `capture()`에서 연속 실패 카운트 임계치(예: 30회) 초과 시 `init_cam()` 재호출
+3. `stop()`에서 `cap.release()` 보장, `__del__` 의존 제거
+4. 디바이스 정보 로그는 `logger.info`로 통일
+
+**위험도**: 🟡 중간
+**영향 범위**: `camera/rgbcam.py`
+**테스트 필요**: 디바이스 연결 해제/재연결 시 프레임 복구 여부, 로그 출력 확인
+
+---
+
+#### 1.5 ThermalCamera 자원 정리 보장 ⭐️⭐️
+
+**파일**: `camera/purethermal/thermalcamera.py`
+**문제**: 예외 시 프로세스/스레드/큐 종료 누락 가능, `cleanup()`만 의존
+
+**소요 시간**: 40분
+**난이도**: ⭐⭐ (중간)
+
+**작업 순서**:
+1. `_capture_loop`에서 예외 발생 시 `proc.terminate()`/`join` 보장
+2. `capture()` 타임아웃 시 스트리밍 중단 후 재시작 옵션 추가
+3. 컨텍스트 매니저 또는 명시적 `start/stop` 패턴으로 사용 강제
+
+**위험도**: 🟡 중간
+**영향 범위**: `camera/purethermal/thermalcamera.py`
+**테스트 필요**: 프로세스/스레드 종료 후 장치 점유 해제 여부, 타임아웃 복구
 
 ---
 
@@ -278,8 +330,8 @@ from core.controller import RuntimeController, CoordState
 
 #### 2.2 하드코딩된 이미지 크기 제거 ⭐️⭐️⭐️
 
-**파일**: `sender.py:239-240`, `gui/app_gui.py:113-119`
-**문제**: IR(160x120), RGB(960x540) 크기 하드코딩
+**파일**: `sender.py:237-245`, `gui/app_gui.py:241-245`, `gui/app_gui.py:1078-1085`, `core/coord_mapper.py:15-38`
+**문제**: IR(160x120), RGB(960x540) 크기 하드코딩으로 설정값 미반영
 **소요 시간**: 1시간
 **난이도**: ⭐⭐ (중간)
 
@@ -344,10 +396,71 @@ def ir_to_rgb(self, ir_x: float, ir_y: float) -> Tuple[float, float]:
 
 ---
 
+#### 2.4 sender 네트워크/패킷/퓨전 모듈화 ⭐️⭐️⭐️
+
+**파일**: `sender.py` (200~520라인)
+**문제**: 연결 재시도, 패킷 직렬화, 압축/인코딩, 동기화, 퓨전/라벨링이 단일 루프에 혼재 → 테스트/수정 비용 큼
+
+**소요 시간**: 2시간
+**난이도**: ⭐⭐⭐ (어려움)
+
+**작업 순서**:
+1. `ImageSender`는 소켓 연결/재접속만 담당 (상태/제어 포함)
+2. 패킷 빌더 함수 모듈화: 이미지 직렬화+압축, 필수 필드 검증
+3. 퓨전/라벨링 처리 분리: 퓨전 결과 생성, draw_fire_annotations 호출을 별도 함수로 이동
+4. 메인 루프는 “버퍼 읽기 → 패킷 빌드 → 전송” 정도로 축소, 단위 테스트 가능하도록 함수 분리
+
+**위험도**: 🟠 높음 (전송 경로 변경)
+**영향 범위**: `sender.py` 주 함수
+**테스트 필요**: 패킷 필수 필드, 전송 실패 시 재접속, 퓨전/라벨 스케일 적용 검증
+
+---
+
+#### 2.5 EO-IR 퓨전/표시 로직 통합 ⭐️⭐️
+
+**파일**: `sender.py:430-499`, `gui/app_gui.py:1061-1094`
+**문제**: 퓨전 결과 색상/라벨/좌표 매퍼 갱신 로직이 중복되어 동작 불일치 위험
+
+**소요 시간**: 1시간
+**난이도**: ⭐⭐ (중간)
+
+**작업 순서**:
+1. `core.fire_fusion`에 “fusion 결과 + annotate” 유틸 추가 (라벨 스케일 입력 포함)
+2. sender/GUI 모두 동일 유틸 호출로 대체, 좌표 매퍼 업데이트 위치 통일
+3. 단위 테스트: 동일 입력에 동일 fusion/annotation이 나오는지 검증
+
+**위험도**: 🟡 중간
+**영향 범위**: `sender.py`, `gui/app_gui.py`, `core/fire_fusion.py`
+**테스트 필요**: 동일 입력 시 색상/라벨/좌표 일치 여부
+
+---
+
+#### 2.6 설정 검증 강화 ⭐️⭐️
+
+**파일**: `configs/get_cfg.py`, `configs/schema.py`
+**문제**: 경로 존재 검증 외에 해상도/타입/배수 제약 확인 없음. README에 960x540은 잘못된 예시지만 기본값과 코드가 불일치.
+
+**소요 시간**: 1시간
+**난이도**: ⭐⭐ (중간)
+
+**작업 순서**:
+1. 해상도 제약 검사 추가: 너비 16배수, 높이 8배수
+2. `TARGET_RES`와 카메라 RES 타입/길이 검증, 상대경로 → 절대경로 변환
+3. 병합 로직(3.2와 연계) 적용 시에도 동일 검증 수행
+
+**위험도**: 🟡 중간
+**영향 범위**: 설정 로더/스키마
+**테스트 필요**: 잘못된 해상도/경로/타입 입력 시 예외 발생 확인
+
+---
+
 ### Phase 2 완료 체크리스트
 
 - [ ] RuntimeController 분리 완료
 - [ ] 하드코딩된 크기 제거 완료
+- [ ] sender 전송/퓨전 루프 모듈화
+- [ ] 퓨전/표시 로직 공통화
+- [ ] 설정 검증 강화(해상도/타입/경로)
 - [ ] 주요 모듈에 타입 힌트 추가
 - [ ] mypy 타입 체크 통과
 - [ ] pytest 통과
@@ -432,22 +545,20 @@ CAMERA:
     RES: [1280, 720]
 ```
 
-**3.2.3 설정 로더 수정**
+**3.2.3 설정 로더 수정 (병합 로직 추가)**
 ```python
-# configs/get_cfg.py
+# configs/get_cfg.py (예시)
 def get_cfg():
-    # 기본 설정 로드
     base_config = load_yaml('config_base.yaml')
-
-    # 환경별 오버라이드
     env = os.getenv('DEPLOY_ENV', 'pc')  # board | pc
     env_config = load_yaml(f'environments/{env}.yaml')
-
-    # 병합
-    return merge_configs(base_config, env_config)
+    merged = merge_configs(base_config, env_config)
+    return _to_dataclass(merged)  # schema/dataclass도 병합 구조에 맞게 수정 필요
 ```
 
-**위험도**: 🟠 높음 (설정 로직 변경)
+**주의**: 현재 `configs/get_cfg.py`와 `schema.py`는 단일 YAML을 전제로 하므로, `merge_configs` 구현·경로 구조 추가·dataclass/검증 로직 수정까지 포함해야 완료로 간주. `config.yaml`과 `config_pc.yaml`은 장치 경로/모델 경로/Delegate/디스플레이 기본값 등 핵심 값이 달라 단순 “90% 동일”로 보기 어렵다는 점을 반영.
+
+**위험도**: 🟠 높음 (설정 로직/검증 변경)
 
 ---
 
@@ -532,9 +643,9 @@ git tag backup-before-phase3
 ```
 
 **문제 발생 시 롤백**:
-```bash
-git reset --hard backup-before-phaseX
-```
+- 우선 해당 Phase 브랜치에서 원인 커밋을 revert
+- 필요 시 태그에서 새 브랜치로 복원: `git switch -c restore-phaseX backup-before-phaseX`
+- 다른 작업 손실 가능성이 있으므로 `git reset --hard`는 최후 수단으로만 사용
 
 ---
 
@@ -560,7 +671,8 @@ git reset --hard backup-before-phaseX
 **Week 3-4: Phase 2**
 - [ ] Week 3: RuntimeController 분리 (2.1)
 - [ ] Week 4 Mon-Tue: 하드코딩 제거 (2.2)
-- [ ] Week 4 Wed-Fri: 타입 힌트 추가 (2.3)
+- [ ] Week 4 Wed: sender 모듈화 (2.4) + 퓨전/표시 공통화 (2.5)
+- [ ] Week 4 Thu-Fri: 설정 검증 강화 (2.6), 타입 힌트 추가 (2.3)
 
 **Week 5-8: Phase 3**
 - [ ] Week 5-6: GUI 분리 (3.1)
@@ -591,6 +703,8 @@ git reset --hard backup-before-phaseX
 | 타입 힌트 비율 | ~10% | 60%+ |
 | 평균 함수 길이 | ~45줄 | ~30줄 |
 | 최대 클래스 크기 | 1,134줄 | <400줄 |
+
+**해상도 제약 메모**: README에 RGB 해상도는 너비 16배수·높이 8배수 제약이 명시되어 있으며 960x540은 “잘못된 예시”로 적혀 있음. Phase 2.2에서 해상도 하드코딩을 제거할 때 설정/제약 동기화를 함께 처리해야 함.
 
 ---
 
